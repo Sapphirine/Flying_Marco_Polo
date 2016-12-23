@@ -1,0 +1,282 @@
+CREATE TABLE airport(
+pid INT, 
+name VARCHAR(80),
+city VARCHAR(80), 
+country VARCHAR(80),
+IATA VARCHAR(80),
+ICAO VARCHAR(80),
+latitude DOUBLE,
+longitude DOUBLE,
+altitude DOUBLE,
+timezone INT,
+TZ VARCHAR(80),
+PRIMARY KEY(pid)
+); 
+
+
+LOAD DATA LOCAL INFILE '~/airports.dat' INTO TABLE airport
+FIELDS TERMINATED BY ',';
+
+DELETE  FROM airport WHERE IATA IS NULL;
+
+
+
+
+####create capital city list
+
+CREATE TABLE capital(
+country VARCHAR(80),
+cityname VARCHAR(80),
+PRIMARY KEY(cityname,country)
+);
+
+delete from capital;
+LOAD DATA LOCAL INFILE '~/capital_big.txt' INTO TABLE capital
+FIELDS TERMINATED BY ','
+LINES TERMINATED BY '\r\n';
+
+#####select corresponding airport BNP
+
+
+ SELECT a.city,a.country, a.latitude,a.longitude,a.altitude FROM capital c,airport a WHERE a.city=c.cityname AND a.country=c.country ORDER BY a.city;
+
+###avy latitude and longtitude
+CREATE TABLE coor(
+cityname VARCHAR(80),
+country VARCHAR(80),
+latitude DOUBLE,
+longtitude DOUBLE,
+PRIMARY KEY(cityname,country)
+);
+
+delete from coor;
+INSERT INTO coor
+SELECT a.city,a.country, AVG(a.latitude),AVG(a.longitude)
+FROM capital c,airport a 
+WHERE a.city=c.cityname AND a.country= c.country GROUP BY a.city,a.country;
+
+####distance 
+CREATE TABLE distance(
+depcity  VARCHAR(80),
+depcountry  VARCHAR(80),
+descity VARCHAR(80),
+descountry VARCHAR(80),
+deplatitude DOUBLE,
+deplongtitude DOUBLE,
+deslatitude DOUBLE,
+deslongtitude DOUBLE,
+PRIMARY KEY(depcity,descity)
+);
+
+delete from distance;
+INSERT INTO distance
+SELECT c1.cityname,c1.country,c2.cityname,c2.country,c1.latitude,c1.longtitude,c2.latitude,c2.longtitude
+FROM coor c1 JOIN coor c2 
+ORDER BY c1.cityname,c2.cityname; 
+
+
+################################################################################################
+CREATE TABLE route(
+air VARCHAR(80),
+airid VARCHAR(80),
+sIATA VARCHAR(80),
+s VARCHAR(80),
+dIATA VARCHAR(80),
+d VARCHAR(80),
+codeshare VARCHAR(80),
+stop INT,
+equi VARCHAR(80),
+PRIMARY KEY(air,airid,sIATA,s,dIATA,d)
+); 
+
+LOAD DATA LOCAL INFILE '~/routes.dat' INTO TABLE route
+FIELDS TERMINATED BY ',';
+
+CREATE TABLE flight(
+depIATA VARCHAR(80),
+depcity VARCHAR(80),
+desIATA VARCHAR(80),
+descity VARCHAR(80),
+PRIMARY KEY(depIATA,depcity,desIATA,descity)
+);
+
+
+
+INSERT INTO flight
+SELECT DISTINCT r.sIATA,a1.city,r.dIATA,a2.city FROM route r, airport a1,airport a2 WHERE r.sIATA=a1.IATA AND r.dIATA=a2.IATA AND r.sIATA IS NOT NULL AND r.dIATA IS NOT NULL;
+
+CREATE TABLE flights(
+depcity VARCHAR(80),
+descity VARCHAR(80),
+PRIMARY KEY(depcity,descity)
+);
+
+INSERT INTO flights
+SELECT DISTINCT depcity,descity FROM flight;
+
+CREATE TABLE connect(
+depcity  VARCHAR(80),
+depcountry  VARCHAR(80),
+descity VARCHAR(80),
+descountry VARCHAR(80),
+connect VARCHAR(80),
+PRIMARY KEY(depcity,descity)
+);
+
+delete from connect;
+INSERT INTO connect
+SELECT d.depcity,d.depcountry,d.descity,d.descountry,f.descity con
+FROM distance d LEFT OUTER JOIN flights f ON d.depcity=f.depcity AND d.descity=f.descity 
+ORDER BY d.depcity,d.descity;
+
+
+SELECT depcity,depcountry, COUNT(*) FROM connect  WHERE connect.connect IS NULL GROUP BY depcity,depcountry ORDER BY COUNT(*);
+
+
+mysql -u root -p
+#################################################################################################
+
+
+
+###########################################################################################
+CREATE TABLE FRroute(
+air VARCHAR(80),
+airid VARCHAR(80),
+sIATA VARCHAR(80),
+s VARCHAR(80),
+dIATA VARCHAR(80),
+d VARCHAR(80),
+codeshare VARCHAR(80),
+stop INT,
+equi VARCHAR(80),
+PRIMARY KEY(air,airid,sIATA,s,dIATA,d)
+); 
+
+INSERT INTO FRroute
+SELECT * FROM route WHERE air="FR";
+############
+CREATE TABLE FRcoor(
+cityname VARCHAR(80),
+country VARCHAR(80),
+latitude DOUBLE,
+longtitude DOUBLE,
+IATA VARCHAR(80),
+PRIMARY KEY(cityname,country,IATA)
+);
+
+INSERT INTO FRcoor
+SELECT a.city,a.country,a.latitude,a.longitude,a.IATA
+FROM airport a
+WHERE a.IATA IN
+(SELECT DISTINCT sIATA FROM FRroute);
+#############
+DROP TABLE FRdistance;
+CREATE TABLE FRdistance(
+depcity  VARCHAR(80),
+depcountry  VARCHAR(80),
+descity VARCHAR(80),
+descountry VARCHAR(80),
+deplatitude DOUBLE,
+deplongtitude DOUBLE,
+deslatitude DOUBLE,
+deslongtitude DOUBLE,
+depIATA VARCHAR(80),
+desIATA VARCHAR(80),
+PRIMARY KEY(depcity,descity,depIATA,desIATA)
+);
+
+INSERT INTO FRdistance
+SELECT c1.cityname,c1.country,c2.cityname,c2.country,c1.latitude,c1.longtitude,c2.latitude,c2.longtitude,c1.IATA,c2.IATA
+FROM FRcoor c1 JOIN FRcoor c2 
+ORDER BY c1.IATA,c2.IATA; 
+
+##############
+DROP TABLE FRconnect;
+CREATE TABLE FRconnect(
+depcity  VARCHAR(80),
+depcountry  VARCHAR(80),
+depIATA VARCHAR(80),
+descity VARCHAR(80),
+descountry VARCHAR(80),
+desIATA VARCHAR(80),
+connect VARCHAR(80),
+PRIMARY KEY(depcity,descity,depIATA,desIATA)
+);
+
+delete from FRconnect;
+INSERT INTO FRconnect
+SELECT d.depcity,d.depcountry,d.depIATA,d.descity,d.descountry,d.desIATA,f.dIATA
+FROM FRdistance d LEFT OUTER JOIN FRroute f ON d.depIATA=f.sIATA AND d.desIATA=f.dIATA 
+ORDER BY d.depIATA,d.desIATA;
+
+SELECT depcity,depcountry,depIATA,COUNT(*) FROM FRconnect  WHERE FRconnect.connect IS NULL GROUP BY depcity,depcountry,depIATA ORDER BY COUNT(*);
+
+
+#######################################################################################
+customed
+
+
+##########################################################################################
+
+CREATE TABLE costum(
+country VARCHAR(80),
+cityname VARCHAR(80),
+PRIMARY KEY(cityname,country)
+);
+
+delete from costum;
+INSERT INTO costum (country,cityname) VALUES (Beijing,China),(Paris,France)
+
+CREATE TABLE coscoor(
+cityname VARCHAR(80),
+country VARCHAR(80),
+latitude DOUBLE,
+longtitude DOUBLE,
+PRIMARY KEY(cityname,country)
+);
+
+delete from coscoor;
+INSERT INTO coscoor
+SELECT a.city,a.country, AVG(a.latitude),AVG(a.longitude)
+FROM costum c,airport a 
+WHERE a.city=c.cityname AND a.country= c.country GROUP BY a.city,a.country;
+
+
+CREATE TABLE cosdistance(
+depcity  VARCHAR(80),
+depcountry  VARCHAR(80),
+descity VARCHAR(80),
+descountry VARCHAR(80),
+deplatitude DOUBLE,
+deplongtitude DOUBLE,
+deslatitude DOUBLE,
+deslongtitude DOUBLE,
+PRIMARY KEY(depcity,descity)
+);
+
+delete from cosdistance;
+INSERT INTO cosdistance
+SELECT c1.cityname,c1.country,c2.cityname,c2.country,c1.latitude,c1.longtitude,c2.latitude,c2.longtitude
+FROM coscoor c1 JOIN coscoor c2 
+ORDER BY c1.cityname,c2.cityname; 
+
+
+
+CREATE TABLE cosconnect(
+depcity  VARCHAR(80),
+depcountry  VARCHAR(80),
+descity VARCHAR(80),
+descountry VARCHAR(80),
+connect VARCHAR(80),
+PRIMARY KEY(depcity,descity)
+);
+
+delete from cosconnect;
+INSERT INTO cosconnect
+SELECT d.depcity,d.depcountry,d.descity,d.descountry,f.descity con
+FROM cosdistance d LEFT OUTER JOIN flights f ON d.depcity=f.depcity AND d.descity=f.descity 
+ORDER BY d.depcity,d.descity;
+
+
+SELECT depcity,depcountry, COUNT(*) FROM cosconnect  WHERE cosconnect.connect IS NULL GROUP BY depcity,depcountry ORDER BY COUNT(*);
+
